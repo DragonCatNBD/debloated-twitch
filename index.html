@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamLight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0c0c0d;
+    --panel:    #141416;
+    --surface:  #1c1c1f;
+    --border:   #2a2a2e;
+    --hover:    #242428;
+    --accent:   #9147ff;
+    --accent2:  #bf94ff;
+    --live:     #eb0400;
+    --text:     #e8e8ea;
+    --muted:    #6b6b72;
+    --sub:      #9a9aa2;
+    --font-h:   'Syne', sans-serif;
+    --font-b:   'DM Sans', sans-serif;
+    --r:        10px;
+    --sidebar:  240px;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-b); overflow: hidden; }
+
+  /* ── Layout ── */
+  #app { display: flex; height: 100vh; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--sidebar);
+    min-width: var(--sidebar);
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width .25s ease, min-width .25s ease;
+  }
+  #sidebar.collapsed { width: 56px; min-width: 56px; }
+  #sidebar.collapsed .label,
+  #sidebar.collapsed .logo-text,
+  #sidebar.collapsed #search-wrap,
+  #sidebar.collapsed .section-head,
+  #sidebar.collapsed .fav-meta { display: none; }
+  #sidebar.collapsed .fav-item { justify-content: center; padding: 10px 0; }
+  #sidebar.collapsed .fav-avatar { margin: 0; }
+
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .logo-icon {
+    width: 28px; height: 28px; flex-shrink: 0;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon svg { width: 14px; height: 14px; fill: #fff; }
+  .logo-text { font-family: var(--font-h); font-size: 15px; font-weight: 800; letter-spacing: -.3px; color: var(--text); }
+  .logo-text span { color: var(--accent2); }
+
+  #search-wrap { padding: 12px 12px 8px; }
+  #search {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px 8px 32px;
+    color: var(--text);
+    font-family: var(--font-b);
+    font-size: 13px;
+    outline: none;
+    transition: border-color .2s;
+    position: relative;
+  }
+  #search:focus { border-color: var(--accent); }
+  .search-wrap-inner { position: relative; }
+  .search-icon {
+    position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    opacity: .4; pointer-events: none;
+  }
+
+  .section-head {
+    padding: 10px 16px 6px;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  #favs-list { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+  #favs-list::-webkit-scrollbar { width: 3px; }
+  #favs-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+  .fav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-radius: 8px;
+    margin: 1px 6px;
+    transition: background .15s;
+    position: relative;
+  }
+  .fav-item:hover { background: var(--hover); }
+  .fav-item.active { background: var(--hover); }
+  .fav-item.active::before {
+    content: '';
+    position: absolute; left: 0; top: 20%; height: 60%;
+    width: 3px; background: var(--accent);
+    border-radius: 0 4px 4px 0;
+  }
+  .fav-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid transparent;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-h); font-weight: 700; font-size: 13px;
+    color: var(--sub);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .fav-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+  .fav-item.live .fav-avatar { border-color: var(--live); }
+  .fav-meta { min-width: 0; }
+  .fav-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fav-status { font-size: 11px; color: var(--muted); }
+  .fav-item.live .fav-status { color: var(--live); font-weight: 600; }
+  .live-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--live); margin-right: 4px; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  .add-btn {
+    margin: 6px 12px 12px;
+    background: none; border: 1px dashed var(--border);
+    border-radius: 8px; padding: 8px;
+    color: var(--muted); font-size: 12px; font-family: var(--font-b);
+    cursor: pointer; transition: all .2s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .add-btn:hover { border-color: var(--accent); color: var(--accent2); }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Topbar ── */
+  #topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 16px;
+    height: 52px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-shrink: 0;
+  }
+  #collapse-btn {
+    background: none; border: none; cursor: pointer; color: var(--muted);
+    padding: 6px; border-radius: 6px; transition: all .15s;
+    display: flex; align-items: center;
+  }
+  #collapse-btn:hover { background: var(--hover); color: var(--text); }
+  #channel-display {
+    font-family: var(--font-h); font-weight: 700; font-size: 16px;
+    flex: 1;
+  }
+  #channel-display span { color: var(--accent2); }
+  .topbar-actions { display: flex; gap: 8px; }
+  .tb-btn {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px;
+    color: var(--sub); font-size: 12px; font-family: var(--font-b); font-weight: 500;
+    cursor: pointer; transition: all .2s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tb-btn:hover { border-color: var(--accent); color: var(--text); }
+  .tb-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tb-btn svg { flex-shrink: 0; }
+
+  /* ── Player area ── */
+  #content { display: flex; flex: 1; overflow: hidden; }
+
+  #player-wrap {
+    flex: 1;
+    background: #000;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #player-wrap iframe {
+    width: 100%; height: 100%;
+    border: none;
+  }
+
+  #empty-state {
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+  }
+  .empty-icon {
+    width: 64px; height: 64px;
+    background: var(--surface);
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .empty-icon svg { opacity: .4; }
+  #empty-state h2 { font-family: var(--font-h); font-size: 20px; font-weight: 700; color: var(--text); }
+  #empty-state p { color: var(--muted); font-size: 13px; max-width: 260px; line-height: 1.6; }
+  #go-btn {
+    background: var(--accent); border: none;
+    border-radius: 10px; padding: 10px 24px;
+    color: #fff; font-family: var(--font-b); font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: opacity .2s;
+  }
+  #go-btn:hover { opacity: .85; }
+
+  /* ── Chat ── */
+  #chat-panel {
+    width: 300px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #chat-panel.open { display: flex; }
+  #chat-panel iframe { flex: 1; border: none; }
+
+  /* ── Modal ── */
+  #modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  #modal-bg.open { display: flex; }
+  #modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 340px;
+    animation: slideUp .2s ease;
+  }
+  @keyframes slideUp { from{transform:translateY(10px);opacity:0} to{transform:translateY(0);opacity:1} }
+  #modal h3 { font-family: var(--font-h); font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+  #modal p { color: var(--muted); font-size: 12.5px; margin-bottom: 18px; line-height: 1.6; }
+  #modal input {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+    color: var(--text); font-family: var(--font-b); font-size: 14px;
+    outline: none; margin-bottom: 14px; transition: border-color .2s;
+  }
+  #modal input:focus { border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; }
+  .modal-cancel {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px;
+    color: var(--sub); font-family: var(--font-b); font-size: 13px;
+    cursor: pointer; transition: all .15s;
+  }
+  .modal-cancel:hover { border-color: var(--text); color: var(--text); }
+  .modal-confirm {
+    flex: 2; background: var(--accent); border: none;
+    border-radius: 8px; padding: 9px;
+    color: #fff; font-family: var(--font-b); font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .modal-confirm:hover { opacity: .88; }
+
+  /* Right-click context */
+  #ctx-menu {
+    position: fixed; z-index: 200;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 5px;
+    min-width: 140px; display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  }
+  #ctx-menu.open { display: block; }
+  .ctx-item {
+    padding: 8px 12px; border-radius: 6px;
+    font-size: 13px; cursor: pointer;
+    transition: background .12s;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ctx-item:hover { background: var(--hover); }
+  .ctx-item.danger { color: #ff5555; }
+
+  /* Notification */
+  #notif {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px;
+    font-size: 13px; color: var(--text);
+    opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none;
+    z-index: 300;
+  }
+  #notif.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ── -->
+  <nav id="sidebar">
+    <div class="logo" onclick="toggleSidebar()">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M11.64 5.93h1.43v4.28h-1.43m3.93-4.28H17v4.28h-1.43M7 2L3.43 5.57v12.86h4.28V22l3.58-3.57h2.85L20.57 12V2m-1.43 9.29l-2.85 2.85h-2.86l-2.5 2.5v-2.5H7.71V3.43h11.43z"/></svg>
+      </div>
+      <span class="logo-text">Stream<span>Light</span></span>
+    </div>
+
+    <div id="search-wrap">
+      <div class="search-wrap-inner">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input id="search" type="text" placeholder="Watch channel…" autocomplete="off" spellcheck="false"
+          onkeydown="if(event.key==='Enter')watchChannel(this.value.trim())">
+      </div>
+    </div>
+
+    <div class="section-head label">Favorites</div>
+    <div id="favs-list"></div>
+
+    <button class="add-btn label" onclick="openModal()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      Add streamer
+    </button>
+  </nav>
+
+  <!-- ── Main ── -->
+  <div id="main">
+
+    <!-- Topbar -->
+    <div id="topbar">
+      <button id="collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+        </svg>
+      </button>
+      <div id="channel-display">Select a <span>channel</span> to watch</div>
+      <div class="topbar-actions">
+        <button class="tb-btn" id="chat-toggle" onclick="toggleChat()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          Chat
+        </button>
+        <button class="tb-btn" onclick="openInTwitch()" title="Open in Twitch">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+          Twitch.tv
+        </button>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div id="content">
+      <div id="player-wrap">
+        <div id="empty-state">
+          <div class="empty-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+              <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+          </div>
+          <h2>Nothing playing</h2>
+          <p>Pick a favorite from the sidebar or type a channel name and press Enter.</p>
+          <button id="go-btn" onclick="promptChannel()">Watch a channel</button>
+        </div>
+      </div>
+      <div id="chat-panel"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Add streamer modal -->
+<div id="modal-bg" onclick="closeModal(event)">
+  <div id="modal">
+    <h3>Add Streamer</h3>
+    <p>Enter a Twitch channel name to add it to your favorites sidebar.</p>
+    <input id="modal-input" type="text" placeholder="e.g. xqc, shroud, pokimane…"
+      onkeydown="if(event.key==='Enter')confirmAdd()"
+      autocomplete="off" spellcheck="false">
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm" onclick="confirmAdd()">Add to Favorites</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+<div id="ctx-menu">
+  <div class="ctx-item" onclick="ctxWatch()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polygon points="5 3 19 12 5 21 5 3"/>
+    </svg>
+    Watch now
+  </div>
+  <div class="ctx-item danger" onclick="ctxRemove()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+    </svg>
+    Remove
+  </div>
+</div>
+
+<div id="notif"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+const STORAGE_KEY = 'sl_favs_v2';
+let favs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let currentChannel = null;
+let chatOpen = false;
+let sidebarCollapsed = false;
+let ctxTarget = null;
+
+// ── Init ───────────────────────────────────────────────────────
+renderFavs();
+
+// ── Storage ────────────────────────────────────────────────────
+function saveFavs() { localStorage.setItem(STORAGE_KEY, JSON.stringify(favs)); }
+
+// ── Sidebar ────────────────────────────────────────────────────
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  document.getElementById('sidebar').classList.toggle('collapsed', sidebarCollapsed);
+}
+
+// ── Channel colors for avatars ─────────────────────────────────
+const COLORS = ['#9147ff','#bf94ff','#6441a5','#4a90d9','#36a2eb','#7b68ee','#9370db'];
+function getColor(name) { let h=0; for(let c of name) h=(h*31+c.charCodeAt(0))%COLORS.length; return COLORS[h]; }
+
+// ── Render favs ────────────────────────────────────────────────
+function renderFavs() {
+  const list = document.getElementById('favs-list');
+  list.innerHTML = '';
+  favs.forEach((ch, i) => {
+    const el = document.createElement('div');
+    el.className = 'fav-item' + (ch === currentChannel ? ' active' : '');
+    el.dataset.ch = ch;
+    el.innerHTML = `
+      <div class="fav-avatar" style="background:${getColor(ch)};color:#fff;border-color:transparent">
+        ${ch[0].toUpperCase()}
+      </div>
+      <div class="fav-meta">
+        <div class="fav-name">${ch}</div>
+        <div class="fav-status">Click to watch</div>
+      </div>`;
+    el.onclick = () => watchChannel(ch);
+    el.oncontextmenu = (e) => { e.preventDefault(); openCtx(e, ch); };
+    list.appendChild(el);
+  });
+}
+
+// ── Watch ──────────────────────────────────────────────────────
+function watchChannel(ch) {
+  if (!ch) return;
+  ch = ch.toLowerCase().replace(/[^a-z0-9_]/g,'');
+  if (!ch) return;
+  currentChannel = ch;
+
+  const parent = location.hostname || 'localhost';
+  const pw = document.getElementById('player-wrap');
+
+  pw.innerHTML = `<iframe
+    src="https://player.twitch.tv/?channel=${encodeURIComponent(ch)}&parent=${parent}&autoplay=true&muted=false"
+    allowfullscreen
+    allow="autoplay; fullscreen"
+  ></iframe>`;
+
+  if (chatOpen) loadChat(ch);
+  document.getElementById('channel-display').innerHTML = `Watching <span>${ch}</span>`;
+  document.getElementById('search').value = '';
+
+  // Update active state
+  renderFavs();
+}
+
+function loadChat(ch) {
+  const parent = location.hostname || 'localhost';
+  const cp = document.getElementById('chat-panel');
+  cp.innerHTML = `<iframe
+    src="https://www.twitch.tv/embed/${encodeURIComponent(ch)}/chat?parent=${parent}&darkpopout"
+  ></iframe>`;
+}
+
+// ── Chat toggle ────────────────────────────────────────────────
+function toggleChat() {
+  chatOpen = !chatOpen;
+  const panel = document.getElementById('chat-panel');
+  const btn   = document.getElementById('chat-toggle');
+  panel.classList.toggle('open', chatOpen);
+  btn.classList.toggle('active', chatOpen);
+  if (chatOpen && currentChannel) loadChat(currentChannel);
+  else if (!chatOpen) panel.innerHTML = '';
+}
+
+// ── Open in Twitch ─────────────────────────────────────────────
+function openInTwitch() {
+  if (currentChannel) window.open(`https://twitch.tv/${currentChannel}`, '_blank');
+  else window.open('https://twitch.tv', '_blank');
+}
+
+// ── Prompt quick channel ───────────────────────────────────────
+function promptChannel() {
+  document.getElementById('search').focus();
+}
+
+// ── Modal ──────────────────────────────────────────────────────
+function openModal() {
+  document.getElementById('modal-bg').classList.add('open');
+  setTimeout(() => document.getElementById('modal-input').focus(), 80);
+}
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-bg'))
+    document.getElementById('modal-bg').classList.remove('open');
+}
+function confirmAdd() {
+  let ch = document.getElementById('modal-input').value.trim().toLowerCase().replace(/[^a-z0-9_]/g,'');
+  document.getElementById('modal-input').value = '';
+  document.getElementById('modal-bg').classList.remove('open');
+  if (!ch) return;
+  if (favs.includes(ch)) { notify(`${ch} is already in favorites`); return; }
+  favs.push(ch);
+  saveFavs();
+  renderFavs();
+  notify(`Added ${ch} to favorites`);
+}
+
+// ── Context menu ───────────────────────────────────────────────
+function openCtx(e, ch) {
+  ctxTarget = ch;
+  const m = document.getElementById('ctx-menu');
+  m.style.left = e.clientX + 'px';
+  m.style.top  = e.clientY + 'px';
+  m.classList.add('open');
+}
+function ctxWatch() {
+  if (ctxTarget) watchChannel(ctxTarget);
+  closeCtx();
+}
+function ctxRemove() {
+  if (!ctxTarget) return;
+  favs = favs.filter(f => f !== ctxTarget);
+  saveFavs(); renderFavs();
+  if (currentChannel === ctxTarget) {
+    currentChannel = null;
+    document.getElementById('player-wrap').innerHTML = `<div id="empty-state">
+      <div class="empty-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+      </div>
+      <h2>Nothing playing</h2>
+      <p>Pick a favorite or type a channel name and press Enter.</p>
+      <button id="go-btn" onclick="promptChannel()">Watch a channel</button>
+    </div>`;
+    document.getElementById('channel-display').innerHTML = `Select a <span>channel</span> to watch`;
+  }
+  closeCtx();
+  notify(`Removed ${ctxTarget}`);
+  ctxTarget = null;
+}
+function closeCtx() { document.getElementById('ctx-menu').classList.remove('open'); }
+document.addEventListener('click', closeCtx);
+document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeCtx(); closeModal(); } });
+
+// ── Notification ───────────────────────────────────────────────
+let notifTimer;
+function notify(msg) {
+  const el = document.getElementById('notif');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>
