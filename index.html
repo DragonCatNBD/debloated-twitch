@@ -61,7 +61,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .logo-text { font-family: var(--font-h); font-size: 15px; font-weight: 800; letter-spacing: -.3px; }
 .logo-text span { color: var(--accent2); }
 
-#search-wrap { padding: 12px 12px 8px; }
+#search-wrap { padding: 12px 12px 8px; position: relative; }
 .search-wrap-inner { position: relative; }
 .search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); opacity: .4; pointer-events: none; }
 #search {
@@ -71,6 +71,45 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   outline: none; transition: border-color .2s;
 }
 #search:focus { border-color: var(--accent); }
+
+/* ── Search Suggestions Dropdown ── */
+#suggestions {
+  position: absolute; top: calc(100% - 4px); left: 12px; right: 12px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden; z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,.6);
+  display: none;
+}
+#suggestions.open { display: block; }
+.sug-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; cursor: pointer; transition: background .12s;
+}
+.sug-item:hover, .sug-item.focused { background: var(--hover); }
+.sug-avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-h); font-weight: 700; font-size: 11px; color: #fff;
+}
+.sug-avatar.watch-icon {
+  background: rgba(145,71,255,.15); border: 1px solid rgba(145,71,255,.25);
+  color: var(--accent2);
+}
+.sug-text { flex: 1; min-width: 0; }
+.sug-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sug-label { font-size: 11px; color: var(--muted); }
+.sug-enter {
+  font-size: 11px; color: var(--muted); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 5px; flex-shrink: 0;
+}
+.sug-divider {
+  height: 1px; background: var(--border); margin: 2px 8px;
+}
+.sug-section-label {
+  padding: 6px 10px 2px; font-size: 10px; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--muted);
+}
 
 .section-head { padding: 10px 16px 6px; font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
 
@@ -343,9 +382,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input id="search" type="text" placeholder="Watch channel…" autocomplete="off" spellcheck="false"
-          onkeydown="if(event.key==='Enter')watchChannel(this.value.trim())">
+        <input id="search" type="text" placeholder="Watch channel…" autocomplete="off" spellcheck="false">
       </div>
+      <div id="suggestions"></div>
     </div>
 
     <div class="section-head label">Favorites</div>
@@ -484,34 +523,39 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
-const STORAGE = 'sl_favs_v4';
-const GQL     = 'https://gql.twitch.tv/gql';
-const CID     = 'kimne78kx3ncx6brgo4mv6wki5h1ko'; // Twitch public client ID
-const COLORS  = ['#9147ff','#bf94ff','#6441a5','#4a90d9','#36a2eb','#7b68ee'];
-const AD_KEYS = ['stitched-ad','ad-quartile','adstart','adend','amazon-ivs-ad','commercial'];
+const STORAGE  = 'sl_favs_v4';
+const GQL      = 'https://gql.twitch.tv/gql';
+const CID      = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+const COLORS   = ['#9147ff','#bf94ff','#6441a5','#4a90d9','#36a2eb','#7b68ee'];
+const AD_KEYS  = ['stitched-ad','ad-quartile','adstart','adend','amazon-ivs-ad','commercial'];
+const MAX_RETRIES = 3; // ← max HLS retry attempts before giving up
 
 // ── State ────────────────────────────────────────────────────────────────────
-let favs      = JSON.parse(localStorage.getItem(STORAGE) || '[]');
-let curCh     = null;
-let chatOpen  = false;
-let collapsed = false;
-let ctxTarget = null;
-let hls       = null;
-let isAd      = false;
-let adCount   = 0;
-let hideTimer = null;
-let qualOpen  = false;
-let prevCC    = 0;
+let favs        = JSON.parse(localStorage.getItem(STORAGE) || '[]');
+let curCh       = null;
+let chatOpen    = false;
+let collapsed   = false;
+let ctxTarget   = null;
+let hls         = null;
+let isAd        = false;
+let adCount     = 0;
+let hideTimer   = null;
+let qualOpen    = false;
+let prevCC      = 0;
+let retryCount  = 0; // ← tracks retry attempts
+let sugFocusIdx = -1; // ← keyboard nav for suggestions
 
 // ── Element refs ─────────────────────────────────────────────────────────────
-const video   = document.getElementById('video');
-const pw      = document.getElementById('player-wrap');
-const loadOv  = document.getElementById('loading-overlay');
-const adOv    = document.getElementById('ad-overlay');
-const loadTxt = document.getElementById('load-txt');
-const badge   = document.getElementById('adblock-badge');
-const abText  = document.getElementById('ab-text');
+const video    = document.getElementById('video');
+const pw       = document.getElementById('player-wrap');
+const loadOv   = document.getElementById('loading-overlay');
+const adOv     = document.getElementById('ad-overlay');
+const loadTxt  = document.getElementById('load-txt');
+const badge    = document.getElementById('adblock-badge');
+const abText   = document.getElementById('ab-text');
 const adCountL = document.getElementById('ad-count-lbl');
+const searchEl = document.getElementById('search');
+const sugBox   = document.getElementById('suggestions');
 
 // ── Twitch API ───────────────────────────────────────────────────────────────
 async function fetchToken(channel) {
@@ -522,13 +566,18 @@ async function fetchToken(channel) {
   }];
   const r = await fetch(GQL, {
     method: 'POST',
-    headers: { 'Client-ID': CID, 'Content-Type': 'application/json' },
+    headers: {
+      'Client-ID': CID,
+      'Content-Type': 'application/json',
+      'Referer': 'https://www.twitch.tv',
+      'Origin': 'https://www.twitch.tv'
+    },
     body: JSON.stringify(body)
   });
-  if (!r.ok) throw new Error('GQL failed');
+  if (!r.ok) throw new Error('GQL failed ' + r.status);
   const j = await r.json();
   const tok = j[0]?.data?.streamPlaybackAccessToken;
-  if (!tok) throw new Error('No token');
+  if (!tok) throw new Error('No token — channel may be offline or name is wrong');
   return tok;
 }
 
@@ -551,30 +600,23 @@ function fragHasAd(frag) {
   return AD_KEYS.some(k => tags.includes(k)) ||
          (url.includes('amazon') && (url.includes('-ad') || url.includes('ads.')));
 }
-
 function id3HasAd(buf) {
   const txt = (() => { try { return new TextDecoder().decode(buf); } catch { return ''; } })();
   return { ad: AD_KEYS.some(k => txt.includes(k)), end: txt.includes('adend') || txt.includes('stream-end'), txt };
 }
-
 function enterAd() {
   if (isAd) return;
-  isAd = true;
-  video.muted = true;
-  adOv.classList.add('active');
-  badge.classList.add('blocking');
+  isAd = true; video.muted = true;
+  adOv.classList.add('active'); badge.classList.add('blocking');
   adCount++;
   adCountL.textContent = `${adCount} ad${adCount > 1 ? 's' : ''} blocked this session`;
   abText.textContent = 'Blocking Ad…';
 }
-
 function exitAd() {
   if (!isAd) return;
-  isAd = false;
-  video.muted = false;
+  isAd = false; video.muted = false;
   video.volume = +document.getElementById('vol-slider').value;
-  adOv.classList.remove('active');
-  badge.classList.remove('blocking');
+  adOv.classList.remove('active'); badge.classList.remove('blocking');
   abText.textContent = `Ad Shield ✓ (${adCount} blocked)`;
 }
 
@@ -583,8 +625,9 @@ async function watchChannel(ch) {
   if (!ch) return;
   ch = ch.toLowerCase().replace(/[^a-z0-9_]/g, '');
   if (!ch) return;
-  curCh = ch;
-  document.getElementById('search').value = '';
+  curCh = ch; retryCount = 0;
+  searchEl.value = '';
+  closeSuggestions();
   document.getElementById('channel-display').innerHTML = `Watching <span>${ch}</span>`;
   document.getElementById('empty-state').style.display = 'none';
   exitAd(); destroyHls();
@@ -598,14 +641,13 @@ async function watchChannel(ch) {
   } catch (e) {
     console.warn(e);
     hideLoad();
-    notify('Could not connect — channel may be offline');
+    notify('Could not connect — ' + (e.message || 'channel may be offline'));
     resetPlayer();
   }
 }
 
 function startHls(url) {
   if (!Hls.isSupported()) {
-    // Safari: native HLS
     video.src = url;
     video.style.display = 'block';
     pw.classList.add('has-video');
@@ -627,6 +669,7 @@ function startHls(url) {
   hls.attachMedia(video);
 
   hls.on(Hls.Events.MANIFEST_PARSED, (_, d) => {
+    retryCount = 0; // reset on success
     hideLoad();
     video.style.display = 'block';
     pw.classList.add('has-video');
@@ -634,7 +677,7 @@ function startHls(url) {
     buildQual(d.levels);
   });
 
-  // ── Detection layer 1: ID3 timed metadata (most accurate) ──
+  // ── Detection layer 1: ID3 timed metadata ──
   hls.on(Hls.Events.FRAG_PARSING_METADATA, (_, d) => {
     if (!d.samples) return;
     for (const s of d.samples) {
@@ -654,20 +697,18 @@ function startHls(url) {
     const details = d.details;
     if (!details) return;
     let adInPlaylist = false;
-    // Check dateRanges (EXT-X-DATERANGE with ad class)
     if (details.dateRanges) {
       for (const dr of Object.values(details.dateRanges)) {
         const cls = ((dr.attr && dr.attr['CLASS']) || '').toLowerCase();
         if (cls.includes('ad') || cls.includes('stitched')) { adInPlaylist = true; break; }
       }
     }
-    // Check fragments
     if (!adInPlaylist) {
       const raw = JSON.stringify(details.fragments || []).toLowerCase();
       adInPlaylist = AD_KEYS.some(k => raw.includes(k));
     }
     if (adInPlaylist) enterAd();
-    else if (isAd)   exitAd(); // playlist clean = ad done
+    else if (isAd)   exitAd();
   });
 
   // ── Detection layer 4: discontinuity counter ──
@@ -675,16 +716,29 @@ function startHls(url) {
     const cc = d.frag.cc;
     if (cc !== prevCC) {
       prevCC = cc;
-      // Discontinuity = potential ad boundary
       setTimeout(() => { if (isAd) exitAd(); }, 1200);
     }
   });
 
+  // ── Fixed: retry with counter, give up after MAX_RETRIES ──
   hls.on(Hls.Events.ERROR, (_, d) => {
     if (!d.fatal) return;
-    if (d.type === Hls.ErrorTypes.NETWORK_ERROR) { setLoadTxt('Retrying…'); hls.startLoad(); }
-    else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-    else { notify('Stream error — channel may be offline'); resetPlayer(); }
+    if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
+      if (retryCount < MAX_RETRIES) {
+        retryCount++;
+        setLoadTxt(`Retrying… (${retryCount}/${MAX_RETRIES})`);
+        showLoad(`Retrying… (${retryCount}/${MAX_RETRIES})`);
+        setTimeout(() => hls && hls.startLoad(), 2000);
+      } else {
+        notify('Stream unavailable — channel may be offline or region-locked');
+        resetPlayer();
+      }
+    } else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
+      hls.recoverMediaError();
+    } else {
+      notify('Stream error — channel may be offline');
+      resetPlayer();
+    }
   });
 }
 
@@ -692,12 +746,12 @@ function startHls(url) {
 function buildQual(levels) {
   const m = document.getElementById('qual-menu');
   m.innerHTML = '';
-  const auto = el('div', 'qopt sel', 'Auto (Best)');
+  const auto = mkEl('div', 'qopt sel', 'Auto (Best)');
   auto.onclick = () => { hls.currentLevel = -1; selQual(auto); closeQual(); };
   m.appendChild(auto);
   levels.forEach((lvl, i) => {
     const lbl = lvl.height ? `${lvl.height}p${lvl.frameRate ? Math.round(lvl.frameRate) : ''}` : `Level ${i+1}`;
-    const d = el('div', 'qopt', lbl);
+    const d = mkEl('div', 'qopt', lbl);
     d.onclick = () => { hls.currentLevel = i; selQual(d); closeQual(); };
     m.appendChild(d);
   });
@@ -714,7 +768,6 @@ function syncPlayBtn() {
 }
 video.addEventListener('play', syncPlayBtn);
 video.addEventListener('pause', syncPlayBtn);
-
 function togglePlay() { video.paused ? video.play() : video.pause(); }
 function toggleMute() {
   video.muted = !video.muted;
@@ -748,6 +801,198 @@ function loadChat(ch) {
     `<iframe src="https://www.twitch.tv/embed/${ch}/chat?parent=${parent}&darkpopout" allow="autoplay"></iframe>`;
 }
 
+// ── Search Suggestions ───────────────────────────────────────────────────────
+let sugDebounce = null;
+let sugItems    = []; // [{ch, label, isFav, isWatch}]
+
+searchEl.addEventListener('input', () => {
+  const q = searchEl.value.trim().toLowerCase().replace(/[^a-z0-9_]/g,'');
+  clearTimeout(sugDebounce);
+  if (!q) { closeSuggestions(); return; }
+  sugDebounce = setTimeout(() => buildSuggestions(q), 120);
+});
+
+searchEl.addEventListener('keydown', e => {
+  if (!sugBox.classList.contains('open')) {
+    if (e.key === 'Enter') { watchChannel(searchEl.value.trim()); return; }
+    return;
+  }
+  const items = sugBox.querySelectorAll('.sug-item');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    sugFocusIdx = Math.min(sugFocusIdx + 1, items.length - 1);
+    updateSugFocus(items);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    sugFocusIdx = Math.max(sugFocusIdx - 1, -1);
+    updateSugFocus(items);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (sugFocusIdx >= 0 && items[sugFocusIdx]) {
+      items[sugFocusIdx].click();
+    } else {
+      watchChannel(searchEl.value.trim());
+      closeSuggestions();
+    }
+  } else if (e.key === 'Escape') {
+    closeSuggestions();
+  }
+});
+
+searchEl.addEventListener('blur', () => {
+  // small delay so click on suggestion registers first
+  setTimeout(closeSuggestions, 160);
+});
+
+function updateSugFocus(items) {
+  items.forEach((el, i) => el.classList.toggle('focused', i === sugFocusIdx));
+}
+
+async function buildSuggestions(q) {
+  sugFocusIdx = -1;
+  const matched = favs.filter(f => f.startsWith(q) || f.includes(q));
+
+  // Try Twitch GQL search for live channel suggestions
+  let remote = [];
+  try {
+    remote = await fetchChannelSearch(q);
+    // Remove dupes with favs
+    remote = remote.filter(r => !favs.includes(r));
+  } catch {}
+
+  renderSuggestions(q, matched, remote);
+}
+
+async function fetchChannelSearch(q) {
+  const body = [{
+    operationName: 'SearchResultsPage_SearchResults',
+    variables: { query: q, options: { targets: [{ index: 'CHANNEL' }] } },
+    extensions: {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: 'ee977ac21b324669b4d109eda8260994976450a2c70498cf2dce9e3ac2d79b7e'
+      }
+    }
+  }];
+  const r = await fetch(GQL, {
+    method: 'POST',
+    headers: { 'Client-ID': CID, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(3000)
+  });
+  if (!r.ok) return [];
+  const j = await r.json();
+  // Try both possible response paths
+  const edges = j[0]?.data?.searchResultsPage?.results?.edges ||
+                j[0]?.data?.searchResultsPage?.channels?.edges || [];
+  return edges
+    .map(e => (e.node?.login || e.node?.displayName || '').toLowerCase())
+    .filter(n => n && n !== q)
+    .slice(0, 5);
+}
+
+function renderSuggestions(q, matched, remote) {
+  sugBox.innerHTML = '';
+  let hasContent = false;
+
+  if (matched.length) {
+    const sec = document.createElement('div');
+    sec.className = 'sug-section-label';
+    sec.textContent = 'Favorites';
+    sugBox.appendChild(sec);
+    matched.slice(0, 4).forEach(ch => {
+      sugBox.appendChild(makeSugItem(ch, 'Favorite', true, false));
+    });
+    hasContent = true;
+  }
+
+  if (remote.length) {
+    if (hasContent) {
+      const div = document.createElement('div');
+      div.className = 'sug-divider';
+      sugBox.appendChild(div);
+    }
+    const sec = document.createElement('div');
+    sec.className = 'sug-section-label';
+    sec.textContent = 'Channels';
+    sugBox.appendChild(sec);
+    remote.slice(0, 5).forEach(ch => {
+      sugBox.appendChild(makeSugItem(ch, 'Twitch channel', false, false));
+    });
+    hasContent = true;
+  }
+
+  // Always show "Watch [q]" if not already an exact match in results
+  const exactInList = matched.includes(q) || remote.includes(q);
+  if (!exactInList) {
+    if (hasContent) {
+      const div = document.createElement('div');
+      div.className = 'sug-divider';
+      sugBox.appendChild(div);
+    }
+    sugBox.appendChild(makeSugItem(q, null, false, true));
+    hasContent = true;
+  }
+
+  if (hasContent) {
+    sugBox.classList.add('open');
+  } else {
+    closeSuggestions();
+  }
+}
+
+function makeSugItem(ch, label, isFav, isWatch) {
+  const d = document.createElement('div');
+  d.className = 'sug-item';
+
+  const avatarDiv = document.createElement('div');
+  if (isWatch) {
+    avatarDiv.className = 'sug-avatar watch-icon';
+    avatarDiv.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+  } else {
+    avatarDiv.className = 'sug-avatar';
+    avatarDiv.style.background = color(ch);
+    avatarDiv.textContent = ch[0].toUpperCase();
+  }
+
+  const textDiv = document.createElement('div');
+  textDiv.className = 'sug-text';
+
+  const nameDiv = document.createElement('div');
+  nameDiv.className = 'sug-name';
+  nameDiv.textContent = isWatch ? `Watch "${ch}"` : ch;
+
+  textDiv.appendChild(nameDiv);
+
+  if (label) {
+    const lbl = document.createElement('div');
+    lbl.className = 'sug-label';
+    lbl.textContent = label;
+    textDiv.appendChild(lbl);
+  }
+
+  const enterSpan = document.createElement('span');
+  enterSpan.className = 'sug-enter';
+  enterSpan.textContent = '↵';
+
+  d.appendChild(avatarDiv);
+  d.appendChild(textDiv);
+  d.appendChild(enterSpan);
+
+  d.onclick = () => {
+    closeSuggestions();
+    watchChannel(ch);
+  };
+
+  return d;
+}
+
+function closeSuggestions() {
+  sugBox.classList.remove('open');
+  sugBox.innerHTML = '';
+  sugFocusIdx = -1;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function showLoad(t) { loadTxt.textContent = t; loadOv.classList.add('active'); }
 function hideLoad()  { loadOv.classList.remove('active'); }
@@ -755,7 +1000,7 @@ function setLoadTxt(t) { loadTxt.textContent = t; }
 
 function destroyHls() {
   if (hls) { hls.destroy(); hls = null; }
-  prevCC = 0;
+  prevCC = 0; retryCount = 0;
 }
 function resetPlayer() {
   destroyHls(); exitAd(); hideLoad();
@@ -765,7 +1010,7 @@ function resetPlayer() {
   document.getElementById('channel-display').innerHTML = `Select a <span>channel</span> to watch`;
   curCh = null; renderFavs();
 }
-function el(tag, cls, txt) {
+function mkEl(tag, cls, txt) {
   const e = document.createElement(tag);
   e.className = cls; e.textContent = txt; return e;
 }
@@ -815,7 +1060,7 @@ function openCtx(e, ch) {
   m.style.left = e.clientX + 'px'; m.style.top = e.clientY + 'px';
   m.classList.add('open');
 }
-function ctxWatch() { if (ctxTarget) watchChannel(ctxTarget); closeCtx(); }
+function ctxWatch()  { if (ctxTarget) watchChannel(ctxTarget); closeCtx(); }
 function ctxRemove() {
   if (!ctxTarget) return;
   favs = favs.filter(f => f !== ctxTarget); saveFavs(); renderFavs();
@@ -831,10 +1076,10 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeCtx(); closeModal(); closeQual(); }
+  if (e.key === 'Escape') { closeCtx(); closeModal(); closeQual(); closeSuggestions(); }
   if (e.key === ' ' && curCh && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); togglePlay(); }
-  if (e.key === 'f') toggleFs();
-  if (e.key === 'm') toggleMute();
+  if (e.key === 'f' && document.activeElement.tagName !== 'INPUT') toggleFs();
+  if (e.key === 'm' && document.activeElement.tagName !== 'INPUT') toggleMute();
 });
 
 // ── Notif ─────────────────────────────────────────────────────────────────────
